@@ -107,10 +107,7 @@ def resize_input(pil_img: Image.Image, scale: int, max_output_dim=4096):
 ###############################################################################
 # 6) TILE-BASED INFERENCE
 ###############################################################################
-def tile_inference(model: torch.nn.Module, img: torch.Tensor, tile_size=512, tile_overlap=32):
-    """
-    Tile inference with scale-specific optimizations for tile size and overlap.
-    """
+def tile_inference(model: torch.nn.Module, img: torch.Tensor, tile_size=1024, tile_overlap=16):
     b, c, h, w = img.shape
     sf = model.upscale
     out = torch.zeros(b, c, h * sf, w * sf, device=img.device)
@@ -125,11 +122,9 @@ def tile_inference(model: torch.nn.Module, img: torch.Tensor, tile_size=512, til
             patch = img[:, :, yy:yy + tile_size, xx:xx + tile_size]
             patch_out = model(patch)
             out[..., yy * sf:(yy + tile_size) * sf, xx * sf:(xx + tile_size) * sf] += patch_out
-            ones = torch.ones_like(patch_out)
-            weights[..., yy * sf:(yy + tile_size) * sf, xx * sf:(xx + tile_size) * sf] += ones
+            weights[..., yy * sf:(yy + tile_size) * sf, xx * sf:(xx + tile_size) * sf] += 1
 
-    out = torch.where(weights == 0, out, out / weights)
-    return out
+    return out / weights.clamp(min=1e-6)
 
 
 ###############################################################################
