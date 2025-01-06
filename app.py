@@ -1,3 +1,4 @@
+import time
 import io
 import torch
 import uvicorn
@@ -16,20 +17,18 @@ torch.backends.cudnn.benchmark = True
 
 app = FastAPI()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logging_enabled = True  # Toggle for logging
+
+
+def log_info(message: str):
+    if logging_enabled:
+        print(f"[INFO] {message}")
 
 
 ###############################################################################
 # 1) CREATE L x4 MODEL
 ###############################################################################
 def create_swinir_l_x4_real() -> SwinIR:
-    """
-    'L' real-SwinIR for 4×:
-      - embed_dim=240
-      - depths=[6, 6, 6, 6, 6, 6, 6, 6, 6]
-      - upsampler='nearest+conv'
-      - resi_connection='3conv'
-      - scale=4
-    """
     model = SwinIR(
         upscale=4,
         img_size=64,
@@ -51,16 +50,17 @@ def create_swinir_l_x4_real() -> SwinIR:
 # 2) SAFE LOAD FUNCTION
 ###############################################################################
 def safe_load(model: SwinIR, checkpoint_path: str):
+    start_time = time.time()
     ckpt = torch.load(checkpoint_path, map_location="cpu")
-    print(f"Loading from {checkpoint_path}...")
+    log_info(f"Loading from {checkpoint_path}...")
     for key in ["params", "params_ema", "state_dict", "model"]:
         if key in ckpt:
             try:
                 model.load_state_dict(ckpt[key], strict=False)
-                print("Model loaded successfully.")
+                log_info(f"Model loaded successfully in {time.time() - start_time:.3f} seconds.")
                 return
             except RuntimeError as e:
-                print(f"Error loading model: {e}")
+                log_info(f"Error loading model: {e}")
     model.load_state_dict(ckpt, strict=False)
 
 
@@ -90,6 +90,7 @@ GAN_MODELS = {2: model_gan_x4, 4: model_gan_x4}
 # 5) RESIZE INPUT TO ENFORCE SCALE AND OUTPUT CAP
 ###############################################################################
 def resize_input(pil_img: Image.Image, scale: int, max_output_dim=4096):
+    start_time = time.time()
     w, h = pil_img.size
     target_w, target_h = w * scale, h * scale
 
@@ -98,13 +99,16 @@ def resize_input(pil_img: Image.Image, scale: int, max_output_dim=4096):
         target_w, target_h = int(target_w * factor), int(target_h * factor)
 
     adjusted_w, adjusted_h = max(1, target_w // 4), max(1, target_h // 4)
-    return pil_img.resize((adjusted_w, adjusted_h), Image.BOX)
+    resized_img = pil_img.resize((adjusted_w, adjusted_h), Image.BOX)
+    log_info(f"Resized input in {time.time() - start_time:.3f} seconds.")
+    return resized_img
 
 
 ###############################################################################
 # 6) TILE-BASED INFERENCE
 ###############################################################################
 def tile_inference(model: torch.nn.Module, img: torch.Tensor, tile_size=1024, tile_overlap=16):
+    start_time = time.time()
     b, c, h, w = img.shape
     sf = model.upscale
     out = torch.zeros(b, c, h * sf, w * sf, device=img.device)
@@ -121,26 +125,29 @@ def tile_inference(model: torch.nn.Module, img: torch.Tensor, tile_size=1024, ti
             out[..., yy * sf:(yy + tile_size) * sf, xx * sf:(xx + tile_size) * sf] += patch_out
             weights[..., yy * sf:(yy + tile_size) * sf, xx * sf:(xx + tile_size) * sf] += 1
 
+    log_info(f"Tile-based inference completed in {time.time() - start_time:.3f} seconds.")
     return out / weights.clamp(min=1e-6)
 
 
 ###############################################################################
-# 7) COMPRESS OUTPUT UNDER 5MB
+# 7) COMPRESS JPEG UNDER 5MB
 ###############################################################################
 def compress_jpeg_under_5mb(pil_img: Image.Image, max_size=5_000_000, min_quality=30):
+    start_time = time.time()
     buf = io.BytesIO()
-    quality = 95
+    quality = 100
     while quality >= min_quality:
         buf.seek(0)
         buf.truncate(0)
         pil_img.save(buf, format="JPEG", quality=quality)
         if buf.tell() <= max_size:
-            print(f"Final JPEG size={buf.tell()} bytes, quality={quality}")
+            log_info(f"JPEG compression completed in {time.time() - start_time:.3f} seconds. Final size={buf.tell()} bytes, quality={quality}.")
             buf.seek(0)
             return buf
         quality -= 5
     pil_img.save(buf, format="JPEG", quality=min_quality)
     buf.seek(0)
+    log_info(f"JPEG compression completed with min quality in {time.time() - start_time:.3f} seconds. Final size={buf.tell()} bytes.")
     return buf
 
 
@@ -149,9 +156,10 @@ def compress_jpeg_under_5mb(pil_img: Image.Image, max_size=5_000_000, min_qualit
 ###############################################################################
 @app.post("/upscale")
 async def upscale_image(image: UploadFile = File(...), enhance: bool = Form(False), scale: int = Form(4)):
+    start_time = time.time()
     img_bytes = await image.read()
     pil_input = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    print(f"Original input: {pil_input.size}, scale={scale}, enhance={enhance}")
+    log_info(f"Original input: {pil_input.size}, scale={scale}, enhance={enhance}")
 
     pil_input = resize_input(pil_input, scale, max_output_dim=4096)
     np_img = np.array(pil_input, dtype=np.float32) / 255.0
@@ -171,6 +179,7 @@ async def upscale_image(image: UploadFile = File(...), enhance: bool = Form(Fals
     del tensor_img, out_tensor
     torch.cuda.empty_cache()
 
+    log_info(f"Total processing time: {time.time() - start_time:.3f} seconds.")
     return StreamingResponse(jpeg_buf, media_type="image/jpeg")
 
 
