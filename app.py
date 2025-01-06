@@ -92,28 +92,16 @@ GAN_MODELS = {2: model_gan_x4, 4: model_gan_x4}
 ###############################################################################
 # 5) RESIZE INPUT TO ENFORCE SCALE AND OUTPUT CAP
 ###############################################################################
-def resize_input_for_scale_and_cap(pil_img: Image.Image, scale: int, max_output_dim=4096):
-    """
-    Resizes input to ensure:
-      - Final dimensions match requested scale (2x or 4x).
-      - Output dimensions are capped at `max_output_dim`.
-    """
+def resize_input(pil_img: Image.Image, scale: int, max_output_dim=4096):
     w, h = pil_img.size
-
-    # Determine target dimensions based on scale
     target_w, target_h = w * scale, h * scale
 
-    # Enforce max output dimensions cap
     if target_w > max_output_dim or target_h > max_output_dim:
-        resize_factor = min(max_output_dim / target_w, max_output_dim / target_h)
-        target_w = int(target_w * resize_factor)
-        target_h = int(target_h * resize_factor)
+        factor = min(max_output_dim / target_w, max_output_dim / target_h)
+        target_w, target_h = int(target_w * factor), int(target_h * factor)
 
-    # Adjust input dimensions accordingly for the 4x model
-    adjusted_input_w = max(1, target_w // 4)
-    adjusted_input_h = max(1, target_h // 4)
-    print(f"Adjusted input: {w}x{h} -> {adjusted_input_w}x{adjusted_input_h} for scale={scale}.")
-    return pil_img.resize((adjusted_input_w, adjusted_input_h), Image.LANCZOS)
+    adjusted_w, adjusted_h = max(1, target_w // 4), max(1, target_h // 4)
+    return pil_img.resize((adjusted_w, adjusted_h), Image.BOX)
 
 
 ###############################################################################
@@ -173,7 +161,7 @@ async def upscale_image(image: UploadFile = File(...), enhance: bool = Form(Fals
     pil_input = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     print(f"Original input: {pil_input.size}, scale={scale}, enhance={enhance}")
 
-    pil_input = resize_input_for_scale_and_cap(pil_input, scale, max_output_dim=4096)
+    pil_input = resize_input(pil_input, scale, max_output_dim=4096)
     np_img = np.array(pil_input, dtype=np.float32) / 255.0
     tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(device)
     chosen_model = GAN_MODELS[scale] if enhance else PSNR_MODELS[scale]
