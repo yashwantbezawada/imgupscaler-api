@@ -159,14 +159,9 @@ async def upscale_image(image: UploadFile = File(...), enhance: bool = Form(Fals
     chosen_model = GAN_MODELS[scale] if enhance else PSNR_MODELS[scale]
 
     with torch.inference_mode():
-        tile_size = 512
-        tile_overlap = 32
-        _, _, new_h, new_w = tensor_img.shape
-        if new_h > 2000 or new_w > 2000:
-            print("Performing tile-based inference.")
-            out_tensor = tile_inference(chosen_model, tensor_img, tile_size, tile_overlap)
-        else:
-            out_tensor = chosen_model(tensor_img)
+        tile_size = 1024
+        tile_overlap = 16
+        out_tensor = tile_inference(chosen_model, tensor_img, tile_size, tile_overlap)
 
     out_tensor = torch.clamp(out_tensor, 0, 1)
     out_np = (out_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255.0).astype(np.uint8)
