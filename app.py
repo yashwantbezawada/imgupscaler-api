@@ -52,19 +52,16 @@ def create_swinir_l_x4_real() -> SwinIR:
 ###############################################################################
 def safe_load(model: SwinIR, checkpoint_path: str):
     ckpt = torch.load(checkpoint_path, map_location="cpu")
-    print(f"Loading from {checkpoint_path}, top-level keys: {list(ckpt.keys())[:5]}...")
+    print(f"Loading from {checkpoint_path}...")
     for key in ["params", "params_ema", "state_dict", "model"]:
         if key in ckpt:
             try:
-                model.load_state_dict(ckpt[key], strict=True)
+                model.load_state_dict(ckpt[key], strict=False)
                 print("Model loaded successfully.")
                 return
             except RuntimeError as e:
-                print(f"Error loading with strict=True: {e}. Trying strict=False...")
-                model.load_state_dict(ckpt[key], strict=False)
-                return
+                print(f"Error loading model: {e}")
     model.load_state_dict(ckpt, strict=False)
-    print("Model loaded successfully with strict=False.")
 
 
 ###############################################################################
