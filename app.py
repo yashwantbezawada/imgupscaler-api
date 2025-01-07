@@ -155,7 +155,7 @@ def compress_jpeg_under_5mb(pil_img: Image.Image, max_size=5_000_000, min_qualit
 # 8) ENDPOINT
 ###############################################################################
 @app.post("/upscale")
-async def upscale_image(image: UploadFile = File(...), enhance: bool = Form(False), scale: int = Form(4)):
+async def upscale_image(image: UploadFile = File(...), enhance: bool = Form(True), scale: int = Form(2)):
     start_time = time.time()
     img_bytes = await image.read()
     pil_input = Image.open(io.BytesIO(img_bytes)).convert("RGB")

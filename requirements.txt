@@ -5,3 +5,4 @@ numpy
 timm
 einops
 gunicorn
+python-multipart
